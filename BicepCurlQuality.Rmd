@@ -1,0 +1,105 @@
+---
+title: "Exercise quality"
+author: "Chris Lill"
+date: "17 September 2015"
+output: html_document
+---
+http://groupware.les.inf.puc-rio.br/har
+http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201
+
+A: exactly according to the specification 
+B: throwing the elbows to the front
+C: lifting the dumbbell only halfway
+D: lowering the dumbbell only halfway
+E: throwing the hips to the front
+
+```{r Download}
+library(caret)
+
+# Download project data if it doesn't already exist
+train.file <- "pml-training.csv"
+test.file <- "pml-testing.csv"
+if (!file.exists(train.file)) {
+folder.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+    download.file(paste(folder.url,train.file, sep = ""), train.file)
+    download.file(paste(folder.url,test.file, sep = ""), test.file)
+    date.downloaded = Sys.Date()
+}
+
+raw.train <- read.csv(train.file)
+raw.test2 <- read.csv(test.file)
+```
+
+The study derived many factors from the original data where 98% of the data is NA or blank. We'll remove these factors from the model, along with unnecessary Ids and Timestamps.
+
+```{r RemoveNullFactors}
+all.factors <- names(raw.train)
+remove.names <- c("X",
+                  "raw_timestamp_part_1",
+                  "raw_timestamp_part_2",
+                  "cvtd_timestamp",
+                  "new_window",
+                  "*_roll_belt",
+                  "*_yaw_belt",
+                  "*_pitch_belt",
+                  "*_picth_belt",
+                  "*_roll_arm",
+                  "*_pitch_arm",
+                  "*_picth_arm",
+                  "*_yaw_arm",
+                  "*_roll_dumbbell",
+                  "*_pitch_dumbbell",
+                  "*_picth_dumbbell",
+                  "*_yaw_dumbbell",
+                  "*_roll_forearm",
+                  "*_pitch_forearm",
+                  "*_picth_forearm",
+                  "*_yaw_forearm",
+                  "var_accel_",
+                  "var_total_accel_belt")
+remove.regex <- paste(remove.names, collapse = "|")
+remove.factors <- grepl(remove.regex, all.factors)
+
+full.train <- raw.train[,!remove.factors]
+```
+
+We will use 30% of the training data to validate and tune our model, and call this `ex.test1`. The validation set provided by Coursera will be called `ex.test2`
+
+```{r SplitData}
+library(caret)
+inTrain <- createDataPartition(full.train$classe, p = 0.7, list = FALSE)
+ex.train <- full.train[inTrain,]
+ex.test1 <- full.train[-inTrain,]
+```
+
+Use Principal Component Analysis to select the combinations of factors which have the greatest impact on determining the classification. This approach is particularly suitable for handling large dimensions of sensor data. 
+
+```{r PCA}
+pca.factors <- preProcess(ex.train[, c(-1, -55)], method = "pca", pcaComp = 5)
+pca.train <- predict(pca.factors, ex.train[, c(-1, -55)])
+pca.train <- cbind(ex.train[, c(55, 1)], pca.train)
+
+pca.test1 <- predict(pca.factors, ex.test1[, c(-1, -55)])
+pca.test1 <- cbind(ex.test1[, c(55, 1)], pca.test1)
+
+```
+
+Try some different models
+node size < 1900 ... 19
+Other tuning tips at
+http://stackoverflow.com/questions/23075506/how-to-improve-randomforest-performance
+http://stats.stackexchange.com/questions/53240/practical-questions-on-tuning-random-forests
+
+RF with default settings took 15mins, and provided a "perfect" fit
+
+```{r PCA5.fit}
+pca.fit <- train(classe ~ ., pca.train, method = "rf", nodesize = 1900)
+pca.predict <- predict(pca.fit, pca.test1)
+confusionMatrix(pca.predict, pca.test1$classe)
+
+
+
+```
+
+
+
