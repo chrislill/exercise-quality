@@ -1,5 +1,5 @@
 ---
-title: "Exercise quality"
+title: "Bicep curl quality"
 author: "Chris Lill"
 date: "17 September 2015"
 output: html_document
@@ -13,7 +13,7 @@ C: lifting the dumbbell only halfway
 D: lowering the dumbbell only halfway
 E: throwing the hips to the front
 
-```{r Download}
+```{r Download, cache = TRUE}
 library(caret)
 
 # Download project data if it doesn't already exist
@@ -30,11 +30,13 @@ raw.train <- read.csv(train.file)
 raw.test2 <- read.csv(test.file)
 ```
 
-The study derived many factors from the original data where 98% of the data is NA or blank. We'll remove these factors from the model, along with unnecessary Ids and Timestamps.
+The study derived many factors from the original data where 98% of the data is NA or blank. We'll remove these factors from the model, along with all metadata.
 
-```{r RemoveNullFactors}
+```{r RemoveNullFactors, cache = TRUE}
 all.factors <- names(raw.train)
 remove.names <- c("X",
+                  "user_name",
+                  "num_window",
                   "raw_timestamp_part_1",
                   "raw_timestamp_part_2",
                   "cvtd_timestamp",
@@ -65,24 +67,21 @@ full.train <- raw.train[,!remove.factors]
 
 We will use 30% of the training data to validate and tune our model, and call this `ex.test1`. The validation set provided by Coursera will be called `ex.test2`
 
-```{r SplitData}
+```{r SplitData, cache = TRUE}
 library(caret)
+set.seed(29)
 inTrain <- createDataPartition(full.train$classe, p = 0.7, list = FALSE)
-ex.train <- full.train[inTrain,]
-ex.test1 <- full.train[-inTrain,]
+ex.train <- full.train[inTrain, -53]
+ex.test1 <- full.train[-inTrain, -53]
+classe.train <- full.train[inTrain, 53]
+classe.test1 <- full.train[-inTrain, 53]
 ```
 
 Use Principal Component Analysis to select the combinations of factors which have the greatest impact on determining the classification. This approach is particularly suitable for handling large dimensions of sensor data. 
 
-```{r PCA}
-pca.factors <- preProcess(ex.train[, c(-1, -55)], method = "pca", pcaComp = 5)
-pca.train <- predict(pca.factors, ex.train[, c(-1, -55)])
-pca.train <- cbind(ex.train[, c(55, 1)], pca.train)
 
-pca.test1 <- predict(pca.factors, ex.test1[, c(-1, -55)])
-pca.test1 <- cbind(ex.test1[, c(55, 1)], pca.test1)
 
-```
+
 
 Try some different models
 node size < 1900 ... 19
@@ -90,16 +89,157 @@ Other tuning tips at
 http://stackoverflow.com/questions/23075506/how-to-improve-randomforest-performance
 http://stats.stackexchange.com/questions/53240/practical-questions-on-tuning-random-forests
 
-RF with default settings took 15mins, and provided a "perfect" fit
+Questions
+2. Caret performance using Random Forest. Which parameters?
+    mtry (default 2 for this dataset)
+    turn off cross validation
+    model = FALSE (for GLM)
+    see the returnData argument in trainControl()
+    returnData=FALSE, returnResamp="none", savePredictions=FALSE
+    
+3. Which other algorithms?
+    glm
+    gbm (Gradient boosted machines)
+    Linear regression (not a good fit)
+    Neural networks
+    Decision Jungle
+    ?
+4. Move PCA into caret
 
-```{r PCA5.fit}
-pca.fit <- train(classe ~ ., pca.train, method = "rf", nodesize = 1900)
-pca.predict <- predict(pca.fit, pca.test1)
-confusionMatrix(pca.predict, pca.test1$classe)
+
+6. Try checking for parallel threads
+#install.packages("doParallel")
+library(doParallel)
+registerDoParallel(cores=2)
+
+7. Cache good training models
+saveRDS(myVariableName, file="myFile.rds")
+
+8. Quirk of data that enables 99% accuracy
+"You may also discover another issue with this dataset, that I won't say anything about (yet, and except for a little hint that's relevant here) -- we want to see if anyone notices it.  The hint is that it's possible to get over 99% accuracy using only the *real* predictors -- I did.  That is due to a quirk of the data, which you are invited to figure out.  Also, don't expect that sort of accuracy on other datasets."
 
 
 
+nodesize, time, accuracy
+1900, 260, 37%
+190, 442, 58%
+19, 633, 78%
+1900, 176, 38% - not formula
+1900, 0.4, 38%
+14 with 5, 1.0, 81% 
+14 with 9, 1.4, 92% 
+PCA 25, node 14, 4, 96%
+PCA 25, node 5, 4, 97%
+PCA Preprocess, node 5, 5, 97%
+
+1. Select mtry
+3. Do without PCA
+4. Other algorithms
+
+
+1. Remove control (number = 25)
+2. Repeat without pca
+3. 
+
+
+
+```{r PCA5, cache = TRUE}
+set.seed(1234)
+#ctrl <- trainControl(number = 3)
+pca5.fit <- train(ex.train, 
+                 classe.train,
+                 preProcess = "pca",
+                 method = "rf", 
+                 nodesize = 5, 
+                 ncores = 2)
+pca5.predict <- predict(pca5.fit, ex.test1)
+confusionMatrix(pca5.predict, classe.test1)
+pca5.fit
+pca5.fit$time$everything[3]/60
+saveRDS(pca5.fit, file="pca5.rds")
 ```
 
+```{r PCA1, cache = TRUE}
+set.seed(1234)
+#ctrl <- trainControl(number = 3)
+pca1.fit <- train(ex.train, 
+                 classe.train,
+                 preProcess = "pca",
+                 method = "rf", 
+                 ncores = 2)
+pca1.predict <- predict(pca1.fit, ex.test1)
+confusionMatrix(pca1.predict, classe.test1)
+pca1.fit
+pca1.fit$time$everything[3]/60
+saveRDS(pca1.fit, file="pca1.rds")
+```
 
+```{r rf, cache = TRUE}
+set.seed(1234)
+#ctrl <- trainControl(number = 3)
+rf.fit <- train(ex.train, 
+                 classe.train,
+                 method = "rf", 
+                 ncores = 2)
+rf.predict <- predict(rf.fit, ex.test1)
+confusionMatrix(rf.predict, classe.test1)
+rf.fit
+rf.fit$time$everything[3]/60
+saveRDS(rf.fit, file="rf.rds")
+```
 
+```{r gbm, cache = TRUE}
+set.seed(1234)
+#ctrl <- trainControl(number = 3)
+gbm.fit <- train(ex.train, 
+                 classe.train,
+                 method = "gbm", 
+                 ncores = 2)
+gbm.predict <- predict(gbm.fit, ex.test1)
+confusionMatrix(gbm.predict, classe.test1)
+gbm.fit
+gbm.fit$time$everything[3]/60
+saveRDS(gbm.fit, file="gbm.rds")
+```
+
+```{r ada, cache = TRUE}
+set.seed(1234)
+#ctrl <- trainControl(number = 3)
+ada.fit <- train(ex.train, 
+                 classe.train,
+                 method = "AdaBoost.M1", 
+                 ncores = 2)
+ada.predict <- predict(ada.fit, ex.test1)
+confusionMatrix(ada.predict, classe.test1)
+ada.fit
+ada.fit$time$everything[3]/60
+saveRDS(ada.fit, file="ada.rds")
+```
+
+```{r glm, cache = TRUE}
+set.seed(1234)
+#ctrl <- trainControl(number = 3)
+glm.fit <- train(ex.train, 
+                 classe.train,
+                 method = "glm", 
+                 ncores = 2)
+glm.predict <- predict(glm.fit, ex.test1)
+confusionMatrix(glm.predict, classe.test1)
+glm.fit
+glm.fit$time$everything[3]/60
+saveRDS(glm.fit, file="glm.rds")
+```
+
+```{r nnet, cache = TRUE}
+set.seed(1234)
+#ctrl <- trainControl(number = 3)
+nnet.fit <- train(ex.train, 
+                 classe.train,
+                 method = "nnet", 
+                 ncores = 2)
+nnet.predict <- predict(nnet.fit, ex.test1)
+confusionMatrix(nnet.predict, classe.test1)
+nnet.fit
+nnet.fit$time$everything[3]/60
+saveRDS(nnet.fit, file="nnet.rds")
+```
