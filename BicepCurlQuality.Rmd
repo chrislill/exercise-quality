@@ -14,9 +14,6 @@ D: lowering the dumbbell only halfway
 E: throwing the hips to the front
 
 ```{r Download, cache = TRUE}
-library(caret)
-
-# Download project data if it doesn't already exist
 train.file <- "pml-training.csv"
 test.file <- "pml-testing.csv"
 if (!file.exists(train.file)) {
@@ -77,14 +74,12 @@ classe.train <- full.train[inTrain, 53]
 classe.test1 <- full.train[-inTrain, 53]
 ```
 
-Use Principal Component Analysis to select the combinations of factors which have the greatest impact on determining the classification. This approach is particularly suitable for handling large dimensions of sensor data. 
 
 
 
 
 
-Try some different models
-node size < 1900 ... 19
+
 Other tuning tips at
 http://stackoverflow.com/questions/23075506/how-to-improve-randomforest-performance
 http://stats.stackexchange.com/questions/53240/practical-questions-on-tuning-random-forests
@@ -93,18 +88,9 @@ Questions
 2. Caret performance using Random Forest. Which parameters?
     mtry (default 2 for this dataset)
     turn off cross validation
-    model = FALSE (for GLM)
-    see the returnData argument in trainControl()
-    returnData=FALSE, returnResamp="none", savePredictions=FALSE
+
     
-3. Which other algorithms?
-    glm
-    gbm (Gradient boosted machines)
-    Linear regression (not a good fit)
-    Neural networks
-    Decision Jungle
-    ?
-4. Move PCA into caret
+
 
 
 6. Try checking for parallel threads
@@ -112,134 +98,64 @@ Questions
 library(doParallel)
 registerDoParallel(cores=2)
 
-7. Cache good training models
-saveRDS(myVariableName, file="myFile.rds")
-
 8. Quirk of data that enables 99% accuracy
 "You may also discover another issue with this dataset, that I won't say anything about (yet, and except for a little hint that's relevant here) -- we want to see if anyone notices it.  The hint is that it's possible to get over 99% accuracy using only the *real* predictors -- I did.  That is due to a quirk of the data, which you are invited to figure out.  Also, don't expect that sort of accuracy on other datasets."
 
 
 
-nodesize, time, accuracy
-1900, 260, 37%
-190, 442, 58%
-19, 633, 78%
-1900, 176, 38% - not formula
-1900, 0.4, 38%
-14 with 5, 1.0, 81% 
-14 with 9, 1.4, 92% 
-PCA 25, node 14, 4, 96%
-PCA 25, node 5, 4, 97%
-PCA Preprocess, node 5, 5, 97%
-
-1. Select mtry
-3. Do without PCA
-4. Other algorithms
 
 
-1. Remove control (number = 25)
-2. Repeat without pca
-3. 
+Comparison of classification models with default settings shows that random forest is a good approach that gains 99% accuracy with default settings through the caret package. Principal Component Analysis (PCA) could be applicable to this kind of sensor data. Using a default threshold of 95% does reduce the number of factors from 52 to 25, achieving similar levels of accuracy, but the difference is not significant so we will proceed without PCA.
+
+2. Tune for mtry (1:15) and nodesize
+3. Try decision trees - it might be easy, to find the quirk in the data
 
 
-
-```{r PCA5, cache = TRUE}
-set.seed(1234)
-#ctrl <- trainControl(number = 3)
-pca5.fit <- train(ex.train, 
-                 classe.train,
-                 preProcess = "pca",
-                 method = "rf", 
-                 nodesize = 5, 
-                 ncores = 2)
-pca5.predict <- predict(pca5.fit, ex.test1)
-confusionMatrix(pca5.predict, classe.test1)
-pca5.fit
-pca5.fit$time$everything[3]/60
-saveRDS(pca5.fit, file="pca5.rds")
-```
-
-```{r PCA1, cache = TRUE}
-set.seed(1234)
-#ctrl <- trainControl(number = 3)
-pca1.fit <- train(ex.train, 
-                 classe.train,
-                 preProcess = "pca",
-                 method = "rf", 
-                 ncores = 2)
-pca1.predict <- predict(pca1.fit, ex.test1)
-confusionMatrix(pca1.predict, classe.test1)
-pca1.fit
-pca1.fit$time$everything[3]/60
-saveRDS(pca1.fit, file="pca1.rds")
-```
 
 ```{r rf, cache = TRUE}
 set.seed(1234)
-#ctrl <- trainControl(number = 3)
-rf.fit <- train(ex.train, 
-                 classe.train,
-                 method = "rf", 
-                 ncores = 2)
+ctrl <- trainControl(number = 3)
+ifelse(file.exists("rf.rds"),
+       rf.fit <- readRDS("rf.rds"),
+       rf.fit <- train(ex.train, 
+                       classe.train,
+                       method = "rf",
+                       ncores = 2,
+                       trContrl = ctrl))
 rf.predict <- predict(rf.fit, ex.test1)
 confusionMatrix(rf.predict, classe.test1)
 rf.fit
 rf.fit$time$everything[3]/60
-saveRDS(rf.fit, file="rf.rds")
+if(!file.exists("rf.rds")) saveRDS(rf.fit, file="rf.rds")
 ```
 
-```{r gbm, cache = TRUE}
-set.seed(1234)
-#ctrl <- trainControl(number = 3)
-gbm.fit <- train(ex.train, 
-                 classe.train,
-                 method = "gbm", 
-                 ncores = 2)
-gbm.predict <- predict(gbm.fit, ex.test1)
-confusionMatrix(gbm.predict, classe.test1)
-gbm.fit
-gbm.fit$time$everything[3]/60
-saveRDS(gbm.fit, file="gbm.rds")
+
+```{r mtry, cache = TRUE}
+set.seed(848)
+m.comparison <- data.frame()
+for(m in 1:15) { 
+  rfm.fit <- randomForest(ex.train, classe.train, mtry = m, nodesize = 5)
+  rfm.predict <- predict(rfm.fit, ex.test1)
+  m.comparison <- rbind(m.comparison,
+                        c(m, confusionMatrix(rfm.predict, classe.test1)$overall))
+}
+names(m.comparison) <- c("mtry", "Accuracy", "Kappa", "AccuracyLower", "AccuracyUpper", "AccuracyNull", "AccuracyPValue", "McnemarPValue")
+m.comparison
 ```
 
-```{r ada, cache = TRUE}
-set.seed(1234)
-#ctrl <- trainControl(number = 3)
-ada.fit <- train(ex.train, 
-                 classe.train,
-                 method = "AdaBoost.M1", 
-                 ncores = 2)
-ada.predict <- predict(ada.fit, ex.test1)
-confusionMatrix(ada.predict, classe.test1)
-ada.fit
-ada.fit$time$everything[3]/60
-saveRDS(ada.fit, file="ada.rds")
+
+```{r investigate}
+library(rpart)
+  tree.fit <- train(ex.train, classe.train, method = "rpart")
+tree.fit$finalModel
+tree.predict <- predict(tree.fit, ex.test1)
+confusionMatrix(tree.predict, classe.test1)
+plot(tree.fit$finalModel, uniform = TRUE)
+text(tree.fit$finalModel, use.n=TRUE, all = TRUE, cex = .8)
+
+
+
+
 ```
 
-```{r glm, cache = TRUE}
-set.seed(1234)
-#ctrl <- trainControl(number = 3)
-glm.fit <- train(ex.train, 
-                 classe.train,
-                 method = "glm", 
-                 ncores = 2)
-glm.predict <- predict(glm.fit, ex.test1)
-confusionMatrix(glm.predict, classe.test1)
-glm.fit
-glm.fit$time$everything[3]/60
-saveRDS(glm.fit, file="glm.rds")
-```
 
-```{r nnet, cache = TRUE}
-set.seed(1234)
-#ctrl <- trainControl(number = 3)
-nnet.fit <- train(ex.train, 
-                 classe.train,
-                 method = "nnet", 
-                 ncores = 2)
-nnet.predict <- predict(nnet.fit, ex.test1)
-confusionMatrix(nnet.predict, classe.test1)
-nnet.fit
-nnet.fit$time$everything[3]/60
-saveRDS(nnet.fit, file="nnet.rds")
-```
