@@ -5,36 +5,42 @@ date: "17 September 2015"
 output: html_document
 ---
 
-#
+# Executive summary
+A random forest model has been created to predict the quality of a bicep curl based on sensor data. This model was tuned and is expected to have an out of sample error of ?????
 
+The original study that generated this data is [Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements](http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335) by Ugulino, Cardador, Vega, Velloso, Milidiu, and Fuks. The study categorised bicep curls in the following categories:
 
-http://groupware.les.inf.puc-rio.br/har
-http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201
+* A - exactly according to the specification 
+* B - throwing the elbows to the front
+* C - lifting the dumbbell only halfway
+* D - lowering the dumbbell only halfway
+* E - throwing the hips to the front
 
-A: exactly according to the specification 
-B: throwing the elbows to the front
-C: lifting the dumbbell only halfway
-D: lowering the dumbbell only halfway
-E: throwing the hips to the front
+# Data preparation
+The project supplied a large training set, and a small set of 20 records to be predict, which will be used as follows:
 
-```{r Download, cache = TRUE}
+* `bc.train` contains 70% of the large dataset to train the model,
+* `bc.test` contains 30% of the large dataset to tune the model,
+* `bc.validation` contains the 20 records to be predicted.
+
+Initial investigation shows that the study derived many factors from the original data where 98% of the data is NA or blank. These factors can be removed from the model, along with all metadata, leaving 52 factors for modelling.
+
+```{r Download, cache = TRUE, echo = FALSE}
 train.file <- "pml-training.csv"
-test.file <- "pml-testing.csv"
+validation.file <- "pml-testing.csv"
 if (!file.exists(train.file)) {
 folder.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
     download.file(paste(folder.url,train.file, sep = ""), train.file)
-    download.file(paste(folder.url,test.file, sep = ""), test.file)
+    download.file(paste(folder.url,validation.file, sep = ""), validation.file)
     date.downloaded = Sys.Date()
 }
 
-raw.train <- read.csv(train.file)
-raw.test2 <- read.csv(test.file)
+full.train <- read.csv(train.file)
+bc.validation <- read.csv(validation.file)
 ```
 
-The study derived many factors from the original data where 98% of the data is NA or blank. We'll remove these factors from the model, along with all metadata.
-
-```{r RemoveNullFactors, cache = TRUE}
-all.factors <- names(raw.train)
+```{r RemoveNullFactors, cache = TRUE, echo = FALSE}
+all.factors <- names(full.train)
 remove.names <- c("X",
                   "user_name",
                   "num_window",
@@ -63,22 +69,41 @@ remove.names <- c("X",
 remove.regex <- paste(remove.names, collapse = "|")
 remove.factors <- grepl(remove.regex, all.factors)
 
-full.train <- raw.train[,!remove.factors]
+full.train <- full.train[,!remove.factors]
 ```
 
-We will use 30% of the training data to validate and tune our model, and call this `ex.test1`. The validation set provided by Coursera will be called `ex.test2`
-
-```{r SplitData, cache = TRUE}
-library(caret)
+```{r SplitData, cache = TRUE, echo = FALSE}
+library(caret, quietly = TRUE)
 set.seed(29)
 inTrain <- createDataPartition(full.train$classe, p = 0.7, list = FALSE)
-ex.train <- full.train[inTrain, -53]
-ex.test1 <- full.train[-inTrain, -53]
+bc.train <- full.train[inTrain, -53]
+bc.test <- full.train[-inTrain, -53]
 classe.train <- full.train[inTrain, 53]
-classe.test1 <- full.train[-inTrain, 53]
+classe.test <- full.train[-inTrain, 53]
 ```
 
+# Exploratory data analysis
 
+The following plots show the variability by classification for six factors with the greatest importance in the final model. They show that there are visible differences, but that a combination of factors will be needed for an accurate prediction.
+
+```{r Exploratory, cache = TRUE, echo = FALSE, fig.width=10}
+library(ggplot2, quietly = TRUE)
+library(gridExtra)
+
+b1 <- geom_boxplot(aes(colour = classe))
+b2 <- theme(legend.position="none", axis.title.x = element_blank())
+b3 <- scale_colour_brewer(palette = "Set1")
+
+g1 <- ggplot(full.train, aes(classe, roll_belt)) + b1 + b2 + b3
+g2 <- ggplot(full.train, aes(classe, yaw_belt)) + b1 + b2 + b3
+g3 <- ggplot(full.train, aes(classe, pitch_belt)) + b1 + b2 + b3
+g4 <- ggplot(full.train, aes(classe, magnet_dumbbell_z)) + b1 + b2 + b3
+g5 <- ggplot(full.train, aes(classe, magnet_dumbbell_x)) + b1 + b2 + b3
+g6 <- ggplot(full.train, aes(classe, pitch_forearm)) + b1 + b2 + b3
+grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3, bottom = "Figure 1: Boxplots of six important factors by classification")
+```
+
+# Model selection
 
 8. Quirk of data that enables 99% accuracy
 "You may also discover another issue with this data set, that I won't say anything about (yet, and except for a little hint that's relevant here) -- we want to see if anyone notices it.  The hint is that it's possible to get over 99% accuracy using only the *real* predictors -- I did.  That is due to a quirk of the data, which you are invited to figure out.  Also, don't expect that sort of accuracy on other data sets."
@@ -98,17 +123,17 @@ Iterating through values for mtry, and optimizing for test set accuracy shows gi
 
 
 
-```{r rf, cache = TRUE}
+```{r rf, cache = TRUE, eval = FALSE}
 set.seed(1234)
 ctrl <- trainControl(number = 3)
 ifelse(file.exists("rf.rds"),
        rf.fit <- readRDS("rf.rds"),
-       rf.fit <- train(ex.train, 
+       rf.fit <- train(bc.train, 
                        classe.train,
                        method = "rf",
                        ncores = 2,
                        importance = TRUE))
-rf.predict <- predict(rf.fit, ex.test1)
+rf.predict <- predict(rf.fit, bc.test1)
 confusionMatrix(rf.predict, classe.test1)
 rf.fit
 rf.fit$time$everything[3]/60
@@ -116,12 +141,12 @@ if(!file.exists("rf.rds")) saveRDS(rf.fit, file="rf.rds")
 ```
 
 
-```{r mtry, cache = TRUE}
+```{r mtry, cache = TRUE, eval = FALSE}
 set.seed(848)
 n.comparison <- data.frame()
 for(n in 1:15) { 
-  s <- system.time(rfm.fit <- randomForest(ex.train, classe.train, mtry = 9, nodesize = n))
-  rfm.predict <- predict(rfm.fit, ex.test1)
+  s <- system.time(rfm.fit <- randomForest(bc.train, classe.train, mtry = 9, nodesize = n))
+  rfm.predict <- predict(rfm.fit, bc.test1)
   n.comparison <- rbind(n.comparison,
                         c(n, s, confusionMatrix(rfm.predict, classe.test1)$overall))
 }
@@ -141,29 +166,14 @@ Overfitting is in our favour - since the validation data is sampled from the tra
 1. trainControl
 
 
+# Model analysis
 
 
 
 
 
 
-```{r Exploratory, cache = TRUE}
-library(ggplot2)
-library(gridExtra)
 
-b1 <- geom_boxplot(aes(colour = classe))
-b2 <- theme(legend.position="none", axis.title.x = element_blank())
-b3 <- scale_colour_brewer(palette = "Set1")
-
-g1 <- ggplot(raw.train, aes(classe, roll_belt)) + b1 + b2 + b3
-g2 <- ggplot(raw.train, aes(classe, yaw_belt)) + b1 + b2 + b3
-g3 <- ggplot(raw.train, aes(classe, pitch_belt)) + b1 + b2 + b3
-g4 <- ggplot(raw.train, aes(classe, magnet_dumbbell_z)) + b1 + b2 + b3
-g5 <- ggplot(raw.train, aes(classe, magnet_dumbbell_x)) + b1 + b2 + b3
-g6 <- ggplot(raw.train, aes(classe, pitch_forearm)) + b1 + b2 + b3
-grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3)
-```
-
-```{r Importance, cache = TRUE}
+```{r Importance, cache = TRUE, eval = FALSE}
 varImpPlot(rf.fit$finalModel)
 ```
