@@ -104,76 +104,62 @@ grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3, bottom = "Figure 1: Boxplots of s
 ```
 
 # Model selection
+The choice of Machine Learning algorithm was carried out with caret using different methods including random forest, random forest with principal component analysis (pca) and neural networks. Random forest was the most accurate with a suspiciously high accuracy of 99%.
 
-8. Quirk of data that enables 99% accuracy
-"You may also discover another issue with this data set, that I won't say anything about (yet, and except for a little hint that's relevant here) -- we want to see if anyone notices it.  The hint is that it's possible to get over 99% accuracy using only the *real* predictors -- I did.  That is due to a quirk of the data, which you are invited to figure out.  Also, don't expect that sort of accuracy on other data sets."
+The algorithm was tuned for nodesize. Performance of the algorithm was slow using default settings for caret, since a nodesize of 1 generates big trees and cross-validation is repeated on 25 samples. In this case randomForest() was used. In future analysis I would use the caret package with `train(method = "rf", nodesize = 10)` and `trainControl(method = "null")` Investigation into nodesize illustrated the trade off between performance and accuracy as it approaches 1. Nodesize = 1 will be used in the final model.
 
-
-nodesize = 14 to begin with for performance, but changed to 1 for classification accuracy. 
-changed trainControl, number = 1 or 3 to prevent cross-validation (or remove bootstrapping?) for initial selection of model
-
-
-Comparison of classification models with default settings shows that random forest is a good approach that gains 99% accuracy with default settings through the caret package. Principal Component Analysis (PCA) could be applicable to this kind of sensor data. Using a default threshold of 95% does reduce the number of factors from 52 to 25, achieving similar levels of accuracy, but the difference is not significant so we will proceed without PCA.
-
-Iterating through values for mtry, and optimizing for test set accuracy shows gives an optimal value of 9.
-
-
-
-3. Try decision trees - it might be easy, to find the quirk in the data
-
-
-
-```{r rf, cache = TRUE, eval = FALSE}
-set.seed(1234)
-ctrl <- trainControl(number = 3)
-ifelse(file.exists("rf.rds"),
-       rf.fit <- readRDS("rf.rds"),
-       rf.fit <- train(bc.train, 
-                       classe.train,
-                       method = "rf",
-                       ncores = 2,
-                       importance = TRUE))
-rf.predict <- predict(rf.fit, bc.test1)
-confusionMatrix(rf.predict, classe.test1)
-rf.fit
-rf.fit$time$everything[3]/60
-if(!file.exists("rf.rds")) saveRDS(rf.fit, file="rf.rds")
-```
-
+The algorith was tuned for mtry. Values of mtry from 1 to 15 were used, and mtry = 9 was found to be the optimum. This code is shown below for information, but not evaluated. In future analysis I would use the caret package with `train(method = "rf", tuneGrid = data.frame(mtry = 2:15))`.
 
 ```{r mtry, cache = TRUE, eval = FALSE}
 set.seed(848)
-n.comparison <- data.frame()
-for(n in 1:15) { 
-  s <- system.time(rfm.fit <- randomForest(bc.train, classe.train, mtry = 9, nodesize = n))
-  rfm.predict <- predict(rfm.fit, bc.test1)
-  n.comparison <- rbind(n.comparison,
-                        c(n, s, confusionMatrix(rfm.predict, classe.test1)$overall))
+m.comparison <- data.frame()
+for(m in 1:15) { 
+  s <- system.time(rfm.fit <- randomForest(bc.train, classe.train, mtry = m, nodesize = 10))
+  rfm.predict <- predict(rfm.fit, bc.test)
+  n.comparison <- rbind(m.comparison,
+                        c(m, confusionMatrix(rfm.predict, classe.test1)$overall))
 }
-names(n.comparison) <- c("nodesize", "Duration", "Accuracy", "Kappa", "AccuracyLower", "AccuracyUpper", "AccuracyNull", "AccuracyPValue", "McnemarPValue")
-n.comparison
+names(m.comparison) <- c("mtry", "Accuracy", "Kappa", "AccuracyLower", "AccuracyUpper", "AccuracyNull", "AccuracyPValue", "McnemarPValue")
+m.comparison
 ```
 
-Report covers:
-1. Model design and reasons
-3. Expected out of sample error - estimate the error with cross-validation
-5. 20 results
-6. Compiled html
+Given the relationship between the sensor data in different dimensions, principal component analysis (pca) would appear to be a valuable approach. Investigation showed that a default threshold of 95% reduces the number of factors from 52 to 25, achieving similar levels of accuracy. The improvement in accuracy is not significant so pca will not be used.
 
-Overfitting is in our favour - since the validation data is sampled from the training set, the training data is very indicative of the test data.
+Combine test and train
+
+Create final model using caret
 
 
-1. trainControl
+
 
 
 # Model analysis
+3. Expected out of sample error - estimate the error with cross-validation
 
-
-
-
-
-
+Overfitting is in our favour - since the validation data is sampled from the training set, the training data is very indicative of the test data.
 
 ```{r Importance, cache = TRUE, eval = FALSE}
 varImpPlot(rf.fit$finalModel)
 ```
+
+
+# Prediction assignment
+5. 20 results
+
+
+Finally, compile html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
