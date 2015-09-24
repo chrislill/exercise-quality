@@ -17,11 +17,17 @@ The original study that generated this data is [Wearable Computing: Acceleromete
 * E - throwing the hips to the front
 
 # Data preparation
-The project supplied a large training set, and a small set of 20 records to be predict. For initial investigations and model selection the training set was split with 70% of data to train the model, and 30% to test it. For the final model the full training set was used.
+The project supplied a large training set, and a small set of 20 records to be predict, which will be used as follows: 
+
+* `bc.train` contains 90% of the large dataset to train and test the model, 
+* `bc.validation` contains 10% of the large dataset to measure the out of sample accuracy, 
+* `bc.testcases` contains the 20 records to be predicted for the. 
+
 
 Initial exploration of the data shows that the study derived many factors where 98% of the data is NA or blank. These factors can be removed from the model, along with all metadata, leaving 52 factors for modelling.
 
-```{r Download, cache = TRUE, echo = FALSE}
+```{r DataPrep, cache = TRUE, echo = FALSE}
+# Download files
 train.file <- "pml-training.csv"
 validation.file <- "pml-testing.csv"
 if (!file.exists(train.file)) {
@@ -30,12 +36,11 @@ folder.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
     download.file(paste(folder.url,validation.file, sep = ""), validation.file)
     date.downloaded = Sys.Date()
 }
-full.train <- read.csv(train.file)
-bc.validation <- read.csv(validation.file)
-```
+full.data <- read.csv(train.file)
+bc.testcases <- read.csv(validation.file)
 
-```{r RemoveNullFactors, cache = TRUE, echo = FALSE}
-all.factors <- names(full.train)
+# Remove null factors and metadata
+all.factors <- names(full.data)
 remove.names <- c("X",
                   "user_name",
                   "num_window",
@@ -63,11 +68,16 @@ remove.names <- c("X",
                   "var_total_accel_belt")
 remove.regex <- paste(remove.names, collapse = "|")
 remove.factors <- grepl(remove.regex, all.factors)
-bc.train <- full.train[,!remove.factors]
+bc.train <- full.data[,!remove.factors]
 
-# Separate the outcome from the predictors, because this is a more performant way to call random forest
-classe.train <- bc.train[, 53]
-bc.train <- bc.train[, -53]
+# Partition the data. Also separate the outcome from the predictors, because this is a more performant way to call random forest
+library(caret, quietly = TRUE) 
+set.seed(29) 
+inTrain <- createDataPartition(full.train$classe, p = 0.9, list = FALSE) 
+bc.train <- full.train[inTrain, -53] 
+bc.validation <- full.train[-inTrain, -53] 
+classe.train <- full.train[inTrain, 53] 
+classe.validation <- full.train[-inTrain, 53] 
 ```
 
 # Exploratory data analysis
@@ -82,12 +92,12 @@ b1 <- geom_boxplot(aes(colour = classe))
 b2 <- theme(legend.position="none", axis.title.x = element_blank())
 b3 <- scale_colour_brewer(palette = "Set1")
 
-g1 <- ggplot(full.train, aes(classe, roll_belt)) + b1 + b2 + b3
-g2 <- ggplot(full.train, aes(classe, yaw_belt)) + b1 + b2 + b3
-g3 <- ggplot(full.train, aes(classe, pitch_belt)) + b1 + b2 + b3
-g4 <- ggplot(full.train, aes(classe, magnet_dumbbell_z)) + b1 + b2 + b3
-g5 <- ggplot(full.train, aes(classe, magnet_dumbbell_x)) + b1 + b2 + b3
-g6 <- ggplot(full.train, aes(classe, pitch_forearm)) + b1 + b2 + b3
+g1 <- ggplot(full.data, aes(classe, roll_belt)) + b1 + b2 + b3
+g2 <- ggplot(full.data, aes(classe, yaw_belt)) + b1 + b2 + b3
+g3 <- ggplot(full.data, aes(classe, pitch_belt)) + b1 + b2 + b3
+g4 <- ggplot(full.data, aes(classe, magnet_dumbbell_z)) + b1 + b2 + b3
+g5 <- ggplot(full.data, aes(classe, magnet_dumbbell_x)) + b1 + b2 + b3
+g6 <- ggplot(full.data, aes(classe, pitch_forearm)) + b1 + b2 + b3
 grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3, bottom = "Figure 1: Boxplots of six important factors by classification")
 ```
 
@@ -96,7 +106,7 @@ The choice of machine learning algorithm was carried out with caret using differ
 
 The algorithm was tuned for nodesize. Performance of the algorithm was slow using default settings for caret, since a nodesize of 1 generates large trees and cross-validation is repeated on 25 samples. In this case randomForest() was used. In future analysis I would use the caret package with `train(method = "rf", nodesize = 10)` and `trainControl(method = "null")` Investigation into nodesize illustrated the trade off between performance and accuracy as it approaches 1. Nodesize = 1 will be used in the final model.
 
-The algorith was tuned for mtry. Values of mtry from 1 to 15 were used, and mtry = 9 was found to be the optimum. This code is shown below for information, but not evaluated. It requires that data is split into a training and test set. In future analysis I would use the caret package with `train(method = "rf", tuneGrid = data.frame(mtry = 1:15))`.
+The algorith was tuned for mtry. Values of mtry from 1 to 15 were used, and mtry = 9 was found to be the optimum. This code is shown below for information, but not evaluated. It requires that training data is further split to create an additional test set. In future analysis I would use the caret package with `train(method = "rf", tuneGrid = data.frame(mtry = 1:15))`.
 
 ```{r mtry, cache = TRUE, eval = FALSE}
 set.seed(848)
@@ -113,10 +123,9 @@ m.comparison
 
 Given the relationship between the sensor data in different dimensions, principal component analysis (pca) would appear to be a valuable approach. Investigation showed that a default threshold of 95% reduces the number of factors from 52 to 25, achieving similar levels of accuracy. The improvement in accuracy is not significant so pca will not be used.
 
-The selected model is a randomForest with mtry = 9 and nodesize = 1. It is built using Caret, with cross validation resampling using 10 folds. 
+The selected model is a randomForest with mtry = 9 and nodesize = 1. It is built using Caret, with bootstrap resampling over 25 samples. 
 
 ```{r FinalModel, eval = FALSE}
-library(caret, quietly = TRUE)
 set.seed(29)
 ctrl <- trainControl(method = "cv")
 ifelse(file.exists("final.rds"),
@@ -127,14 +136,13 @@ ifelse(file.exists("final.rds"),
                        tuneGrid = data.frame(mtry = 9)
                        tuneLength = 1))
 if(!file.exists("final.rds")) saveRDS(bc.fit, file="final.rds")
-```
 
-```{r a}
-bc.fit <- readRDS("rf.rds")
+# Predict the outcomes for the validation set using our final model
+bc.predict <- predict(bc.fit$finalModel, bc.validation)
 ```
 
 # Model analysis
-10-fold cross validation was carried out across the whole training dataset on a model with a single set of parameters. The estimate for the out of sample accuracy is `r signif(bc.fit$results[1, "Accuracy"],3)`. The 95% confidence interval for the accuracy is `r signif((bc.fit$results[1, "Accuracy"] + c(-1, 1) * qnorm(0.975) * bc.fit$results[1, "AccuracySD"]),3)`.
+Simple 2-fold cross validation was carried out using a validation set, with 10% of the original training data. The estimate for the out of sample accuracy is `r signif(bc.predict$results[1, "Accuracy"],3)`. The 95% confidence interval for the accuracy is `r signif((bc.predict$results[1, "Accuracy"] + c(-1, 1) * qnorm(0.975) * bc.predict$results[1, "AccuracySD"]),3)`.
 
 This model is a suspiciously good fit, which is a good indicator of overfitting. In this case the 19622 observations are only split across 6 participants, 5 variants, and 10 repetitions. This means that there are ~60 observations for every bicep curl. When predicting one of these observations it can be easily matched to the other set of observations using noise in each repetition. It would be less accurate at predicting observations for new participants, or even additional bicep curls.
 
@@ -144,14 +152,13 @@ The following figures show the confusion matrix and variable importance for the 
 
 ```{r Confusion, echo = FALSE}
 require(knitr, quietly = TRUE)
-kable(bc.fit$finalModel$confusion, 
+kable(confusionMatrix(bc.predict, classe.validation), 
       digits = 3,
       caption = "Figure 2: Confusion matrix for the final model",
       col.names = c("A", "B", "C", "D", "E", "Classification error"))
 ```
 
-
-
+  
 
 ```{r Importance, cache = TRUE, echo = FALSE, fig.height =8, fig.width = 10}
 varImpPlot(bc.fit$finalModel, main = "Figure 3: Importance of each factor in the final model")
