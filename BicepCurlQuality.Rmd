@@ -6,7 +6,9 @@ output: html_document
 ---
 
 # Executive summary
-A random forest model has been created to predict the quality of a bicep curl based on sensor data. This model was tuned and is expected to have an out of sample error of ?????
+A random forest model has been created to predict the quality of a bicep curl based on sensor data. This model was tuned and is expected to have an out of sample error of 0.3%. 
+
+This suspiciously high accuracy indicates overfitting. In this case it is easy to match a specific observation when there are 60 similar observations from the same instance of a bicep curl. An alternative approach would be to select a smaller number of measurements which would be expected to differ for the skeletal movement involved in each type of bicep curl.
 
 The original study that generated this data is [Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements](http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335) by Ugulino, Cardador, Vega, Velloso, Milidiu, and Fuks. The study categorised bicep curls in the following categories:
 
@@ -68,16 +70,16 @@ remove.names <- c("X",
                   "var_total_accel_belt")
 remove.regex <- paste(remove.names, collapse = "|")
 remove.factors <- grepl(remove.regex, all.factors)
-bc.train <- full.data[,!remove.factors]
+usable.data <- full.data[,!remove.factors]
 
 # Partition the data. Also separate the outcome from the predictors, because this is a more performant way to call random forest
 library(caret, quietly = TRUE) 
 set.seed(29) 
-inTrain <- createDataPartition(full.train$classe, p = 0.9, list = FALSE) 
-bc.train <- full.train[inTrain, -53] 
-bc.validation <- full.train[-inTrain, -53] 
-classe.train <- full.train[inTrain, 53] 
-classe.validation <- full.train[-inTrain, 53] 
+inTrain <- createDataPartition(full.data$classe, p = 0.9, list = FALSE) 
+classe.train <- usable.data[inTrain, 53] 
+bc.train <- usable.data[inTrain, -53]
+classe.validation <- usable.data[-inTrain, 53] 
+bc.validation <- usable.data[-inTrain, -53] 
 ```
 
 # Exploratory data analysis
@@ -102,9 +104,9 @@ grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3, bottom = "Figure 1: Boxplots of s
 ```
 
 # Model selection
-The choice of machine learning algorithm was carried out with caret using different methods including random forest, random forest with principal component analysis (pca) and neural networks. Random forest was the most accurate with a suspiciously high accuracy of 99%.
+The choice of machine learning algorithm was carried out with caret using different methods including random forest, random forest with principal component analysis (pca) and neural networks. Random forest was the most accurate with a suspiciously high accuracy of 98%.
 
-The algorithm was tuned for nodesize. Performance of the algorithm was slow using default settings for caret, since a nodesize of 1 generates large trees and cross-validation is repeated on 25 samples. In this case randomForest() was used. In future analysis I would use the caret package with `train(method = "rf", nodesize = 10)` and `trainControl(method = "null")` Investigation into nodesize illustrated the trade off between performance and accuracy as it approaches 1. Nodesize = 1 will be used in the final model.
+The algorithm was tuned for nodesize. Performance of the algorithm was slow using default settings for caret, since a nodesize of 1 generates large trees and cross-validation is repeated on 25 samples by default. In this case randomForest() was used. In future analysis I would use the caret package with `train(method = "rf", nodesize = 10)` and `trainControl(method = "null")` Investigation into nodesize illustrated the trade off between performance and accuracy as it approaches 1. Nodesize = 1 will be used in the final model.
 
 The algorith was tuned for mtry. Values of mtry from 1 to 15 were used, and mtry = 9 was found to be the optimum. This code is shown below for information, but not evaluated. It requires that training data is further split to create an additional test set. In future analysis I would use the caret package with `train(method = "rf", tuneGrid = data.frame(mtry = 1:15))`.
 
@@ -125,24 +127,26 @@ Given the relationship between the sensor data in different dimensions, principa
 
 The selected model is a randomForest with mtry = 9 and nodesize = 1. It is built using Caret, with bootstrap resampling over 25 samples. 
 
-```{r FinalModel, eval = FALSE}
+```{r FinalModel}
+library(caret, quietly = TRUE) 
 set.seed(29)
 ctrl <- trainControl(method = "cv")
-ifelse(file.exists("final.rds"),
-       bc.fit <- readRDS("final.rds"),
-       bc.fit <- train(bc.train, 
-                       classe.train, 
-                       method = "rf", 
-                       tuneGrid = data.frame(mtry = 9)
-                       tuneLength = 1))
-if(!file.exists("final.rds")) saveRDS(bc.fit, file="final.rds")
+model <- ifelse(file.exists("bcFinal.rds"),
+                bc.fit <- readRDS("bcFinal.rds"),
+                bc.fit <- train(bc.train, 
+                                classe.train, 
+                                method = "rf", 
+                                tuneGrid = data.frame(mtry = 9),
+                                tuneLength = 1))
+if(!file.exists("bcFinal.rds")) saveRDS(bc.fit, file="bcFinal.rds")
 
 # Predict the outcomes for the validation set using our final model
-bc.predict <- predict(bc.fit$finalModel, bc.validation)
+suppressMessages(bc.predict <- predict(bc.fit, bc.validation))
+bc.results <- confusionMatrix(bc.predict, classe.validation)
 ```
 
 # Model analysis
-Simple 2-fold cross validation was carried out using a validation set, with 10% of the original training data. The estimate for the out of sample accuracy is `r signif(bc.predict$results[1, "Accuracy"],3)`. The 95% confidence interval for the accuracy is `r signif((bc.predict$results[1, "Accuracy"] + c(-1, 1) * qnorm(0.975) * bc.predict$results[1, "AccuracySD"]),3)`.
+Simple 2-fold cross validation was carried out using a validation set, with 10% of the original training data. The estimate for the out of sample accuracy is `r signif(bc.results$overall["Accuracy"],3)`. The 95% confidence interval for the accuracy is `r signif(bc.results$overall["AccuracyLower"], 3)` to `r signif(bc.results$overall["AccuracyUpper"], 3)`.
 
 This model is a suspiciously good fit, which is a good indicator of overfitting. In this case the 19622 observations are only split across 6 participants, 5 variants, and 10 repetitions. This means that there are ~60 observations for every bicep curl. When predicting one of these observations it can be easily matched to the other set of observations using noise in each repetition. It would be less accurate at predicting observations for new participants, or even additional bicep curls.
 
@@ -152,10 +156,9 @@ The following figures show the confusion matrix and variable importance for the 
 
 ```{r Confusion, echo = FALSE}
 require(knitr, quietly = TRUE)
-kable(confusionMatrix(bc.predict, classe.validation), 
+kable(bc.results$table, 
       digits = 3,
-      caption = "Figure 2: Confusion matrix for the final model",
-      col.names = c("A", "B", "C", "D", "E", "Classification error"))
+      caption = "Figure 2: Confusion matrix for the final model")
 ```
 
   
