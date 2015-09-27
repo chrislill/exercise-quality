@@ -6,9 +6,9 @@ output: html_document
 ---
 
 # Executive summary
-A random forest model has been created to predict the quality of a bicep curl based on sensor data. This model was tuned and is expected to have an out of sample error of 1.1%. 
+A random forest model has been created to predict the quality of a bicep curl based on sensor data. This model was tuned using a subset of 12 features and is expected to have an out of sample error of 2.7%. 
 
-This suspiciously high accuracy indicates overfitting. In this case it is easy to match a specific observation when there are 60 similar observations from the same instance of a bicep curl. An alternative approach would be to select a smaller number of measurements which would be expected to differ for the skeletal movement involved in each type of bicep curl.
+This ease with which a model can be fitted to this data with high accuracy indicates overfitting. In this case it is easy to match a specific observation when there are 60 similar observations from the same instance of a bicep curl. An alternative approach would be to select a smaller number of measurements which would be expected to differ for the skeletal movement involved in each type of bicep curl.
 
 The original study that generated this data is [Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements](http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335) by Ugulino, Cardador, Vega, Velloso, Milidiu, and Fuks. The study categorised bicep curls in the following categories:
 
@@ -81,6 +81,12 @@ classe.train <- usable.data[inTrain, 40]
 bc.train <- usable.data[inTrain, -40]
 classe.validation <- usable.data[-inTrain, 40] 
 bc.validation <- usable.data[-inTrain, -40] 
+
+inTrain <- createDataPartition(classe.train, p = 0.67, list = FALSE) 
+classe.train2 <- classe.train[inTrain] 
+bc.train2 <- bc.train[inTrain, ]
+classe.test <- classe.train[-inTrain] 
+subset.test <- bc.train[-inTrain, ]
 ```
 
 # Exploratory data analysis
@@ -130,36 +136,110 @@ grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3, bottom = "Figure 2: Boxplots of s
 ```
 
 # Model selection
+
+### Algorithm selection
 The choice of machine learning algorithm was carried out with caret using different methods including random forest, random forest with principal component analysis (pca) and neural networks. Random forest was the most accurate with a suspiciously high accuracy of 98%.
 
+### Nodesize tuning
 The algorithm was tuned for nodesize. Performance of the algorithm was slow using default settings for caret, since a nodesize of 1 generates large trees and cross-validation is repeated on 25 samples by default. In this case randomForest() was used. In future analysis I would use the caret package with `train(method = "rf", nodesize = 10)` and `trainControl(method = "null")` Investigation into nodesize illustrated the trade off between performance and accuracy as it approaches 1. Nodesize = 1 will be used in the final model.
 
-The algorith was tuned for mtry. Values of mtry from 1 to 15 were used, and mtry = 9 was found to be the optimum. This code is shown below for information, but not evaluated. It requires that training data is further split to create an additional test set. In future analysis I would use the caret package with `train(method = "rf", tuneGrid = data.frame(mtry = 1:15))`.
+### mtry tuning
+The algorithm was tuned for mtry. Values of mtry from 1 to 15 were used, and mtry = 9 was found to be the optimum. This code is shown below for information, but not evaluated. It requires that training data is further split to create an additional test set. In future analysis I would use the caret package with `train(method = "rf", tuneGrid = data.frame(mtry = 1:15))`.
 
 ```{r mtry, cache = TRUE, eval = FALSE}
 set.seed(848)
 m.comparison <- data.frame()
 for(m in 1:15) { 
-  s <- system.time(rfm.fit <- randomForest(bc.train, classe.train, mtry = m, nodesize = 10))
-  rfm.predict <- predict(rfm.fit, bc.test)
-  n.comparison <- rbind(m.comparison,
-                        c(m, confusionMatrix(rfm.predict, classe.test1)$overall))
+  rfm.fit <- randomForest(bc.train2, classe.train, mtry = m, nodesize = 10)
+  rfm.predict <- predict(rfm.fit, subset.test)
+  m.comparison <- rbind(m.comparison,
+                        c(m, confusionMatrix(rfm.predict, classe.test)$overall))
 }
 names(m.comparison) <- c("mtry", "Accuracy", "Kappa", "AccuracyLower", "AccuracyUpper", "AccuracyNull", "AccuracyPValue", "McnemarPValue")
 m.comparison
 ```
 
+### Principal component analysis
 Given the relationship between the sensor data in different dimensions, principal component analysis (pca) would appear to be a valuable approach. Investigation showed that a default threshold of 95% reduces the number of factors from 52 to 25, achieving similar levels of accuracy. The improvement in accuracy is not significant so pca will not be used.
+
+### Reducing overfitting
+The overfitting caused by using too many factors can be addressed by reducing the number of factors used in the model. A similar analysis to the tuning of mtry shows that the 12 most important factors in the model should achieve 95% accuracy.
+
+```{r RemoveFactors, eval = FALSE, echo = FALSE}
+# The list of feature importance was taken from a previous run of the model with 40 factors
+# Therefore this code snippet will not be executed
+MeanDecreaseGini <- bc.fit$finalModel$importance
+all.importance <- data.frame(MeanDecreaseGini, measure = labels(MeanDecreaseGini)[[1]], stringsAsFactors = FALSE)
+order.importance <- all.importance[order(all.importance$MeanDecreaseGini, decreasing = TRUE),]
+
+ctrl <- trainControl(method = "null")
+feature.compare <- data.frame()
+
+for(i in c(30, 25, 20, 15, 12, 10, 5)) {
+subset.train <- subset(bc.train2, select = order.importance$measure[1:i])
+subset.fit <- train(subset.train,
+                    classe.train2,
+                    method = "rf",
+                    trControl = ctrl,
+                    tuneGrid = data.frame(mtry = 9),
+                    tuneLength = 1)
+suppressMessages(subset.predict <- predict(subset.fit, subset.test))
+
+feature.compare <- rbind(feature.compare,
+                        c(i, confusionMatrix(subset.predict, classe.test)$overall))
+}
+names(feature.compare) <- c("features", "Accuracy", "Kappa", "AccuracyLower", "AccuracyUpper", "AccuracyNull", "AccuracyPValue", "McnemarPValue")
+if(!file.exists("featureCompare.rds")) saveRDS(feature.compare, file="featureCompare.rds")
+```
+
+```{r Accuracy, echo = FALSE}
+require(knitr, quietly = TRUE)
+feature.compare <- readRDS("featureCompare.rds")
+kable(feature.compare, 
+      digits = 3,
+      row.names = FALSE,
+      caption = "Figure 3: Accuracy with different numbers of features")
+```
+
+The following factors will be used in the final model.
+
+* magnet_dumbbell_z
+* pitch_forearm
+* magnet_dumbbell_y
+* roll_forearm
+* magnet_dumbbell_x
+* roll_arm
+* accel_dumbbell_y
+* accel_dumbbell_z
+* roll_dumbbell
+* accel_forearm_x    
+* gyros_dumbbell_y
+* magnet_forearm_z
+
+### Final model
 
 The selected model is a randomForest with mtry = 9 and nodesize = 1. It is built using Caret, with bootstrap resampling over 25 samples. 
 
 ```{r FinalModel}
 library(caret, quietly = TRUE) 
 set.seed(29)
+feature.list <- c("magnet_dumbbell_z",
+                  "pitch_forearm",
+                  "magnet_dumbbell_y",
+                  "roll_forearm",
+                  "magnet_dumbbell_x",
+                  "roll_arm",
+                  "accel_dumbbell_y",
+                  "accel_dumbbell_z",
+                  "roll_dumbbell",
+                  "accel_forearm_x",
+                  "gyros_dumbbell_y",
+                  "magnet_forearm_z")
+
 ctrl <- trainControl(method = "cv")
 model <- ifelse(file.exists("bcFinal.rds"),
                 bc.fit <- readRDS("bcFinal.rds"),
-                bc.fit <- train(bc.train, 
+                bc.fit <- train(subset(bc.train, select = feature.list), 
                                 classe.train, 
                                 method = "rf", 
                                 tuneGrid = data.frame(mtry = 9),
@@ -167,7 +247,7 @@ model <- ifelse(file.exists("bcFinal.rds"),
 if(!file.exists("bcFinal.rds")) saveRDS(bc.fit, file="bcFinal.rds")
 
 # Predict the outcomes for the validation set using our final model
-suppressMessages(bc.predict <- predict(bc.fit, bc.validation))
+suppressMessages(bc.predict <- predict(bc.fit, subset(bc.validation, select = feature.list)))
 bc.results <- confusionMatrix(bc.predict, classe.validation)
 ```
 
@@ -176,7 +256,7 @@ Simple 2-fold cross validation was carried out using a validation set, with 10% 
 
 This model is a suspiciously good fit, which is a good indicator of overfitting. In this case the 19622 observations are only split across 6 participants, 5 variants, and 10 repetitions. This means that there are ~60 observations for every bicep curl. When predicting one of these observations it can be easily matched to the other set of observations using noise in each repetition. It would be less accurate at predicting observations for new participants, or even additional bicep curls.
 
-One way of improving the model so that it is more generalizable would be to select specific factors which are indicative of each variation. Understanding of human musculoskeletal system would be very beneficial here.
+One way of improving the model so that it is more generalizable would be to refine the selection of factors, ideally based on an understanding of human musculoskeletal system. There may be a need to build additional factors based on a full bicep curl, rather than selecting a single observation of sensor readings.
 
 The following figures show the confusion matrix and variable importance for the final model.
 
@@ -184,12 +264,12 @@ The following figures show the confusion matrix and variable importance for the 
 require(knitr, quietly = TRUE)
 kable(bc.results$table, 
       digits = 3,
-      caption = "Figure 3: Confusion matrix for the final model")
+      caption = "Figure 4: Confusion matrix for the final model")
 ```
 
   
 
 ```{r Importance, cache = TRUE, echo = FALSE, fig.height =8, fig.width = 10}
-varImpPlot(bc.fit$finalModel, main = "Figure 4: Importance of each factor in the final model")
+varImpPlot(bc.fit$finalModel, main = "Figure 5: Importance of each factor in the final model")
 ```
 
