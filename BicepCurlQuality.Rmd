@@ -6,7 +6,7 @@ output: html_document
 ---
 
 # Executive summary
-A random forest model has been created to predict the quality of a bicep curl based on sensor data. This model was tuned and is expected to have an out of sample error of 0.3%. 
+A random forest model has been created to predict the quality of a bicep curl based on sensor data. This model was tuned and is expected to have an out of sample error of 1.1%. 
 
 This suspiciously high accuracy indicates overfitting. In this case it is easy to match a specific observation when there are 60 similar observations from the same instance of a bicep curl. An alternative approach would be to select a smaller number of measurements which would be expected to differ for the skeletal movement involved in each type of bicep curl.
 
@@ -67,7 +67,8 @@ remove.names <- c("X",
                   "*_picth_forearm",
                   "*_yaw_forearm",
                   "var_accel_",
-                  "var_total_accel_belt")
+                  "var_total_accel_belt",
+                  "belt")
 remove.regex <- paste(remove.names, collapse = "|")
 remove.factors <- grepl(remove.regex, all.factors)
 usable.data <- full.data[,!remove.factors]
@@ -76,14 +77,39 @@ usable.data <- full.data[,!remove.factors]
 library(caret, quietly = TRUE) 
 set.seed(29) 
 inTrain <- createDataPartition(full.data$classe, p = 0.9, list = FALSE) 
-classe.train <- usable.data[inTrain, 53] 
-bc.train <- usable.data[inTrain, -53]
-classe.validation <- usable.data[-inTrain, 53] 
-bc.validation <- usable.data[-inTrain, -53] 
+classe.train <- usable.data[inTrain, 40] 
+bc.train <- usable.data[inTrain, -40]
+classe.validation <- usable.data[-inTrain, 40] 
+bc.validation <- usable.data[-inTrain, -40] 
 ```
 
 # Exploratory data analysis
 
+## Ranges of values for each participant from the belt sensor
+The following plots show how some measurements have very different values for observations from the belt sensor. This could be because the sensor was fitted in a different way for different participants, or even upside down. A few observations for other sensors showed similar issues, but to a smaller extent. Whilst it might be possible to normalize for each participant so that their data can be combined, in this case we will omit the Belt sensor observations from the dataset.
+
+```{r FactorVariability, echo = FALSE, fig.width=10}
+library(ggplot2, quietly = TRUE)
+library(gridExtra)
+g <- ggplot(full.data, aes(fill = user_name)) + theme(legend.position="none")
+suppressMessages(grid.arrange(g + geom_histogram(aes(roll_belt)),
+             g + geom_histogram(aes(pitch_belt)),
+             g + geom_histogram(aes(yaw_belt)),
+             g + geom_histogram(aes(gyros_belt_x)),
+             g + geom_histogram(aes(gyros_belt_y)),
+             g + geom_histogram(aes(gyros_belt_z)),
+             g + geom_histogram(aes(accel_belt_x)),
+             g + geom_histogram(aes(accel_belt_y)),
+             g + geom_histogram(aes(accel_belt_z)),
+             g + geom_histogram(aes(magnet_belt_x)),
+             g + geom_histogram(aes(magnet_belt_y)),
+             g + geom_histogram(aes(magnet_belt_z)),
+             g + geom_histogram(aes(total_accel_belt)),
+             ncol = 5,
+             bottom = "Figure 1: Differences in belt sensor measurements between participants"))
+```
+
+## Ranges of values for each classification
 The following plots show the variability by classification for six factors with the greatest importance in the final model. They show that there are visible differences, but that a combination of factors will be needed for an accurate prediction.
 
 ```{r Exploratory, cache = TRUE, echo = FALSE, fig.width=10}
@@ -94,13 +120,13 @@ b1 <- geom_boxplot(aes(colour = classe))
 b2 <- theme(legend.position="none", axis.title.x = element_blank())
 b3 <- scale_colour_brewer(palette = "Set1")
 
-g1 <- ggplot(full.data, aes(classe, roll_belt)) + b1 + b2 + b3
-g2 <- ggplot(full.data, aes(classe, yaw_belt)) + b1 + b2 + b3
-g3 <- ggplot(full.data, aes(classe, pitch_belt)) + b1 + b2 + b3
-g4 <- ggplot(full.data, aes(classe, magnet_dumbbell_z)) + b1 + b2 + b3
-g5 <- ggplot(full.data, aes(classe, magnet_dumbbell_x)) + b1 + b2 + b3
-g6 <- ggplot(full.data, aes(classe, pitch_forearm)) + b1 + b2 + b3
-grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3, bottom = "Figure 1: Boxplots of six important factors by classification")
+g1 <- ggplot(full.data, aes(classe, magnet_dumbbell_x)) + b1 + b2 + b3
+g2 <- ggplot(full.data, aes(classe, magnet_dumbbell_y)) + b1 + b2 + b3
+g3 <- ggplot(full.data, aes(classe, magnet_dumbbell_z)) + b1 + b2 + b3
+g4 <- ggplot(full.data, aes(classe, pitch_forearm)) + b1 + b2 + b3
+g5 <- ggplot(full.data, aes(classe, roll_forearm)) + b1 + b2 + b3
+g6 <- ggplot(full.data, aes(classe, roll_arm)) + b1 + b2 + b3
+grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3, bottom = "Figure 2: Boxplots of six important factors by classification")
 ```
 
 # Model selection
@@ -158,12 +184,12 @@ The following figures show the confusion matrix and variable importance for the 
 require(knitr, quietly = TRUE)
 kable(bc.results$table, 
       digits = 3,
-      caption = "Figure 2: Confusion matrix for the final model")
+      caption = "Figure 3: Confusion matrix for the final model")
 ```
 
   
 
 ```{r Importance, cache = TRUE, echo = FALSE, fig.height =8, fig.width = 10}
-varImpPlot(bc.fit$finalModel, main = "Figure 3: Importance of each factor in the final model")
+varImpPlot(bc.fit$finalModel, main = "Figure 4: Importance of each factor in the final model")
 ```
 
